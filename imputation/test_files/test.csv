@@ -1,0 +1,4 @@
+timestamp,temperature,humidity,conductivity,filter_status,damper_position
+2025-01-01T00:00:00Z,20.1,45.0,0.55,OK,30
+2025-01-01T01:00:00Z,21.3,46.0,,OK,32
+2025-01-01T03:00:00Z,24.0,48.0,0.60,MAINT,40
