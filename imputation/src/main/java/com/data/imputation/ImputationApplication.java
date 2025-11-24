@@ -1,13 +1,28 @@
 package com.data.imputation;
 
-import org.springframework.boot.SpringApplication;
+import com.data.imputation.ui.DesktopUi;
+import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.builder.SpringApplicationBuilder;
 
 @SpringBootApplication
-public class ImputationApplication {
+public class ImputationApplication implements CommandLineRunner {
 
-	public static void main(String[] args) {
-		SpringApplication.run(ImputationApplication.class, args);
-	}
+    private final DesktopUi desktopUi;
 
+    public ImputationApplication(DesktopUi desktopUi) {
+        this.desktopUi = desktopUi;
+    }
+
+    public static void main(String[] args) {
+        // headless(false) is required so Swing windows can open
+        new SpringApplicationBuilder(ImputationApplication.class)
+                .headless(false)
+                .run(args);
+    }
+
+    @Override
+    public void run(String... args) {
+        desktopUi.show();
+    }
 }
