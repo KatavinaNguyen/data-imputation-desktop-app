@@ -37,8 +37,17 @@ import java.util.List;
 public class DesktopUi {
 
     private final TimeSeriesInterpolationService interpolationService;
+
     private JTextField suffixField;
     private JLabel exampleLabel;
+
+    // status / progress area
+    private JPanel statusPanel;
+    private JLabel statusLabel;
+    private JLabel statusFileLabel;
+    private JProgressBar statusProgressBar;
+    private JLabel cancelLabel;
+    private SwingWorker<Path, Void> currentWorker;
 
     // Neutral dark grey theme
     private static final Color BG_MAIN      = new Color(12, 12, 14);   // window background
@@ -48,14 +57,19 @@ public class DesktopUi {
     private static final Color FG_PRIMARY   = new Color(232, 232, 235); // main text
     private static final Color FG_MUTED     = new Color(140, 140, 146); // secondary text
 
-    // buttons / accents: soft black/charcoal
-    private static final Color ACCENT_BTN   = new Color(32, 32, 36);   // button bg
-    private static final Color ACCENT_BTN_H = new Color(48, 48, 52);   // hover bg
+    // buttons: white, light grey hover, black text
+    private static final Color BTN_BG       = new Color(250, 250, 250);
+    private static final Color BTN_BG_HOVER = new Color(230, 230, 230);
+    private static final Color BTN_BORDER   = new Color(180, 180, 185);
+    private static final Color BTN_TEXT     = Color.BLACK;
 
     private static final Color BORDER_SOFT  = new Color(54, 54, 60);   // subtle outlines
     private static final Color DROP_BORDER  = new Color(70, 70, 78);   // dashed box border
 
     private static final String BASE_FONT_FAMILY = "SansSerif";
+
+    // simple limit hint for UI
+    private static final int MAX_FILE_MB = 10;
 
     public DesktopUi(TimeSeriesInterpolationService interpolationService) {
         this.interpolationService = interpolationService;
@@ -69,19 +83,18 @@ public class DesktopUi {
 
             JFrame frame = new JFrame("Missing Data Imputation");
             frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-            frame.setSize(560, 380);
+            frame.setSize(580, 420);
             frame.setLocationRelativeTo(null);
             frame.getContentPane().setBackground(BG_MAIN);
             frame.setLayout(new BorderLayout(8, 8));
             frame.setFont(baseFont);
 
-            // ---------- TOP: "Add File Tag" + textbox + Timestamp on one line ----------
+            // ---------- TOP: "Add File Tag" + textbox + Timestamp (one line) ----------
             JPanel topPanel = new JPanel();
             topPanel.setLayout(new BoxLayout(topPanel, BoxLayout.Y_AXIS));
             topPanel.setBorder(BorderFactory.createEmptyBorder(12, 12, 8, 12));
             topPanel.setBackground(BG_PANEL);
 
-            // row: [Add File Tag] [ text field ] [ Timestamp ]
             JPanel rowPanel = new JPanel(new GridBagLayout());
             rowPanel.setOpaque(false);
 
@@ -90,16 +103,15 @@ public class DesktopUi {
             topGbc.insets = new Insets(0, 0, 0, 8);
             topGbc.anchor = GridBagConstraints.WEST;
 
-            // label (left, no stretch)
             JLabel titleLabel = new JLabel("Add File Tag");
             titleLabel.setForeground(FG_PRIMARY);
             titleLabel.setFont(baseFont.deriveFont(Font.BOLD, 13f));
+
             topGbc.gridx = 0;
             topGbc.weightx = 0;
             topGbc.fill = GridBagConstraints.NONE;
             rowPanel.add(titleLabel, topGbc);
 
-            // text field (middle, takes remaining width)
             suffixField = new JTextField();
             suffixField.setToolTipText("Suffix to append to filename (e.g. 2025-01-01, final, imp)");
             suffixField.setBackground(BG_INPUT);
@@ -114,11 +126,10 @@ public class DesktopUi {
             topGbc.fill = GridBagConstraints.HORIZONTAL;
             rowPanel.add(suffixField, topGbc);
 
-            // timestamp button (right, no stretch)
             JButton timestampButton = new JButton("Timestamp");
             timestampButton.setToolTipText("Fill with today's date (yyyy-MM-dd)");
             timestampButton.setFont(baseFont.deriveFont(Font.BOLD, 12f));
-            stylePrimaryButton(timestampButton);
+            styleWhiteButton(timestampButton);
             timestampButton.addActionListener(e -> {
                 String today = LocalDate.now().toString();
                 suffixField.setText(today);
@@ -129,12 +140,10 @@ public class DesktopUi {
             topGbc.fill = GridBagConstraints.NONE;
             rowPanel.add(timestampButton, topGbc);
 
-            // preview label underneath
             exampleLabel = new JLabel();
             exampleLabel.setFont(baseFont.deriveFont(11f));
             exampleLabel.setForeground(FG_MUTED);
 
-            // live update wiring
             suffixField.getDocument().addDocumentListener(new DocumentListener() {
                 @Override public void insertUpdate(DocumentEvent e) { updateExampleLabel(); }
                 @Override public void removeUpdate(DocumentEvent e) { updateExampleLabel(); }
@@ -142,18 +151,16 @@ public class DesktopUi {
             });
             updateExampleLabel();
 
-            // add to top panel
             topPanel.add(rowPanel);
             topPanel.add(Box.createVerticalStrut(6));
             topPanel.add(exampleLabel);
 
-
-            // Divider line (subtle)
+            // Divider line
             JSeparator separator = new JSeparator();
             separator.setForeground(BORDER_SOFT);
             separator.setBackground(BG_MAIN);
 
-            // ---------- BOTTOM: drag-and-drop area (same layout, blue style) ----------
+            // ---------- BOTTOM: drag-and-drop area ----------
             DropAreaPanel dropArea = new DropAreaPanel();
             dropArea.setLayout(new GridBagLayout());
             dropArea.setBackground(BG_MAIN);
@@ -163,7 +170,6 @@ public class DesktopUi {
             gbc.weightx = 1.0;
             gbc.anchor = GridBagConstraints.CENTER;
             gbc.fill   = GridBagConstraints.NONE;
-            // moderate spacing between rows
             gbc.insets = new Insets(2, 4, 2, 4);
 
             JLabel iconLabel = new JLabel();
@@ -173,13 +179,22 @@ public class DesktopUi {
             dragLabel.setFont(baseFont.deriveFont(Font.BOLD, 15f));
             dragLabel.setForeground(FG_PRIMARY);
 
-            JLabel browseLabel = new JLabel(
-                    "<html><span style='color:#A0A0A6;'><u>or browse</u></span></html>"
-            );
-            browseLabel.setFont(baseFont.deriveFont(11f));
-            browseLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            JButton chooseFileButton = new JButton("Choose File");
+            chooseFileButton.setFont(baseFont.deriveFont(Font.BOLD, 12f));
+            styleWhiteButton(chooseFileButton);
 
-            // top spacer to give room above icon
+            JLabel limitLabel = new JLabel("(up to " + MAX_FILE_MB + "MB)");
+            limitLabel.setFont(baseFont.deriveFont(11f));
+            limitLabel.setForeground(FG_MUTED);
+
+            // message to user about actions
+            JLabel infoLabel = new JLabel(
+                    "<html><br><br><i>File cleaning will begin immediately upon selection.</i></html>"
+            );
+            infoLabel.setFont(limitLabel.getFont());
+            infoLabel.setForeground(limitLabel.getForeground());
+
+            // top spacer
             gbc.gridy = 0;
             gbc.weighty = 1.0;
             dropArea.add(Box.createVerticalStrut(4), gbc);
@@ -193,38 +208,91 @@ public class DesktopUi {
             gbc.gridy = 2;
             dropArea.add(dragLabel, gbc);
 
-            // "or browse"
+            // Choose File button
             gbc.gridy = 3;
-            dropArea.add(browseLabel, gbc);
+            dropArea.add(chooseFileButton, gbc);
 
-            // bottom spacer to give room below "or browse"
+            // "(up to X MB)"
             gbc.gridy = 4;
+            dropArea.add(limitLabel, gbc);
+
+            // italic message under it
+            gbc.gridy = 5;
+            dropArea.add(infoLabel, gbc);
+
+            // bottom spacer
+            gbc.gridy = 6;
             gbc.weighty = 1.0;
             dropArea.add(Box.createVerticalStrut(4), gbc);
 
             // Drag & drop support
             new DropTarget(dropArea, new FileDropTargetListener());
 
-            // Browse click -> open file chooser
-            browseLabel.addMouseListener(new java.awt.event.MouseAdapter() {
-                @Override
-                public void mouseClicked(MouseEvent e) {
-                    JFileChooser chooser = new JFileChooser();
-                    chooser.setDialogTitle("Choose CSV file");
-                    int result = chooser.showOpenDialog(frame);
-                    if (result == JFileChooser.APPROVE_OPTION) {
-                        File selected = chooser.getSelectedFile();
-                        if (selected != null) {
-                            handleFile(selected.toPath());
-                        }
+            // Choose File click -> open file chooser
+            chooseFileButton.addActionListener(e -> {
+                JFileChooser chooser = new JFileChooser();
+                chooser.setDialogTitle("Choose CSV file");
+                int result = chooser.showOpenDialog(frame);
+                if (result == JFileChooser.APPROVE_OPTION) {
+                    File selected = chooser.getSelectedFile();
+                    if (selected != null) {
+                        handleFile(selected.toPath());
                     }
                 }
             });
 
+            // ---------- STATUS PANEL (progress + cancel + filename) ----------
+            statusPanel = new JPanel(new BorderLayout(8, 0));
+            statusPanel.setBackground(BG_MAIN);
+            statusPanel.setBorder(BorderFactory.createEmptyBorder(4, 4, 0, 4));
+
+            statusLabel = new JLabel("");
+            statusLabel.setForeground(FG_PRIMARY);
+            statusLabel.setFont(baseFont.deriveFont(11f));
+
+            statusFileLabel = new JLabel("");
+            statusFileLabel.setForeground(FG_MUTED);
+            statusFileLabel.setFont(baseFont.deriveFont(11f));
+
+            JPanel labelStack = new JPanel();
+            labelStack.setLayout(new BoxLayout(labelStack, BoxLayout.Y_AXIS));
+            labelStack.setOpaque(false);
+            labelStack.add(statusLabel);
+            labelStack.add(statusFileLabel);
+
+            statusProgressBar = new JProgressBar();
+            statusProgressBar.setIndeterminate(false);
+            statusProgressBar.setVisible(false);
+            statusProgressBar.setBorder(BorderFactory.createEmptyBorder());
+            statusProgressBar.setPreferredSize(new Dimension(180, 10));
+
+            cancelLabel = new JLabel("CANCEL");
+            cancelLabel.setForeground(new Color(90, 150, 255));
+            cancelLabel.setFont(baseFont.deriveFont(Font.BOLD, 11f));
+            cancelLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+            cancelLabel.addMouseListener(new MouseAdapter() {
+                @Override
+                public void mouseClicked(MouseEvent e) {
+                    // only react if a job is actually running
+                    if (currentWorker != null && !currentWorker.isDone()) {
+                        cancelCurrentWorker();
+                    }
+                }
+            });
+
+            statusPanel.add(labelStack, BorderLayout.WEST);
+            statusPanel.add(statusProgressBar, BorderLayout.CENTER);
+            statusPanel.add(cancelLabel, BorderLayout.EAST);
+            statusPanel.setVisible(false);
+            cancelLabel.setVisible(false);   // start hidden
+
+
+            // wrap bottom area: drop area + status panel
             JPanel dropWrapper = new JPanel(new BorderLayout());
             dropWrapper.setBorder(BorderFactory.createEmptyBorder(8, 12, 12, 12));
             dropWrapper.setBackground(BG_MAIN);
             dropWrapper.add(dropArea, BorderLayout.CENTER);
+            dropWrapper.add(statusPanel, BorderLayout.SOUTH);
 
             frame.getContentPane().add(topPanel, BorderLayout.NORTH);
             frame.getContentPane().add(separator, BorderLayout.CENTER);
@@ -234,7 +302,7 @@ public class DesktopUi {
         });
     }
 
-    // ---------------- helper styling ----------------
+    // ---------- styling helpers ----------
 
     private void installBaseLookAndFeel() {
         try {
@@ -254,42 +322,40 @@ public class DesktopUi {
         UIManager.put("text", FG_PRIMARY);
     }
 
-    private void stylePrimaryButton(JButton button) {
-        button.setBackground(ACCENT_BTN);
-        button.setForeground(Color.WHITE);
+    private void styleWhiteButton(JButton button) {
+        button.setBackground(BTN_BG);
+        button.setForeground(BTN_TEXT);
         button.setFocusPainted(false);
         button.setContentAreaFilled(false);
         button.setOpaque(true);
-        button.setBorder(new RoundedBorder(18, ACCENT_BTN));
+        button.setBorder(new RoundedBorder(1, BTN_BORDER));
         button.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 
-        Color normal = ACCENT_BTN;
-        Color hover  = ACCENT_BTN_H;
+        Color normalBg = BTN_BG;
+        Color hoverBg  = BTN_BG_HOVER;
 
         button.addMouseListener(new MouseAdapter() {
             @Override
             public void mouseEntered(MouseEvent e) {
-                button.setBackground(hover);
-                button.setBorder(new RoundedBorder(18, hover));
+                button.setBackground(hoverBg);
             }
 
             @Override
             public void mouseExited(MouseEvent e) {
-                button.setBackground(normal);
-                button.setBorder(new RoundedBorder(18, normal));
+                button.setBackground(normalBg);
             }
 
             @Override
             public void mousePressed(MouseEvent e) {
-                button.setBackground(hover.darker());
+                button.setBackground(hoverBg.darker());
             }
 
             @Override
             public void mouseReleased(MouseEvent e) {
                 if (button.getBounds().contains(e.getPoint())) {
-                    button.setBackground(hover);
+                    button.setBackground(hoverBg);
                 } else {
-                    button.setBackground(normal);
+                    button.setBackground(normalBg);
                 }
             }
         });
@@ -320,7 +386,6 @@ public class DesktopUi {
     private void loadCloudIcon(JLabel iconLabel) {
         try {
             URL iconUrl = getClass().getResource("/ui/upload-icon.png");
-            System.out.println("Icon URL = " + iconUrl);
             if (iconUrl != null) {
                 ImageIcon rawIcon = new ImageIcon(iconUrl);
                 java.awt.Image img = rawIcon.getImage();
@@ -341,25 +406,75 @@ public class DesktopUi {
         }
     }
 
-    private void handleFile(Path inputPath) {
-        try {
-            String suffix = (suffixField != null) ? suffixField.getText() : "";
-            Path outputPath = interpolationService.processFile(inputPath, suffix);
+    // ---------- processing + status ----------
 
-            JOptionPane.showMessageDialog(
-                    null,
-                    "Completed\nOutput file:\n" + outputPath,
-                    "Done",
-                    JOptionPane.INFORMATION_MESSAGE
-            );
-        } catch (Exception e) {
-            e.printStackTrace();
-            JOptionPane.showMessageDialog(
-                    null,
-                    "Error: " + e.getMessage(),
-                    "Error",
-                    JOptionPane.ERROR_MESSAGE
-            );
+    private void handleFile(Path inputPath) {
+        if (currentWorker != null && !currentWorker.isDone()) {
+            // already processing; ignore additional requests
+            return;
+        }
+
+        String suffix = (suffixField != null) ? suffixField.getText() : "";
+
+        statusPanel.setVisible(true);
+        statusLabel.setText("Processing file...");
+        statusFileLabel.setText(inputPath.getFileName().toString());
+        statusProgressBar.setIndeterminate(true);
+        statusProgressBar.setVisible(true);
+        cancelLabel.setEnabled(true);
+        cancelLabel.setForeground(new Color(90, 150, 255));
+
+        SwingWorker<Path, Void> worker = new SwingWorker<>() {
+            @Override
+            protected Path doInBackground() throws Exception {
+                return interpolationService.processFile(inputPath, suffix);
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    if (isCancelled()) {
+                        statusLabel.setText("Cancelled.");
+                        statusProgressBar.setVisible(false);
+                        cancelLabel.setEnabled(false);
+                        cancelLabel.setForeground(FG_MUTED);
+                        cancelLabel.setVisible(false);   // hide after cancel
+                        return;
+                    }
+
+                    Path output = get(); 
+                    statusLabel.setText("File complete.");
+                    statusFileLabel.setText(output.getFileName().toString());
+                    statusProgressBar.setIndeterminate(false);
+                    statusProgressBar.setVisible(false);
+                    cancelLabel.setEnabled(false);
+                    cancelLabel.setForeground(FG_MUTED);
+                    cancelLabel.setVisible(false);       // hide after success
+
+                } catch (Exception e) {
+                    // handles InterruptedException / ExecutionException
+                    statusLabel.setText("Error: " + e.getMessage());
+                    statusFileLabel.setText("");
+                    statusProgressBar.setVisible(false);
+                    cancelLabel.setEnabled(false);
+                    cancelLabel.setForeground(FG_MUTED);
+                    cancelLabel.setVisible(false);
+                    e.printStackTrace();
+                } finally {
+                    currentWorker = null;
+                }
+            }
+        };
+
+        currentWorker = worker;
+        worker.execute();
+    }
+
+    private void cancelCurrentWorker() {
+        if (currentWorker != null && !currentWorker.isDone()) {
+            currentWorker.cancel(true);
+            statusLabel.setText("Cancelling...");
+            cancelLabel.setEnabled(false);
         }
     }
 
@@ -377,21 +492,19 @@ public class DesktopUi {
                 handleFile(file.toPath());
             } catch (Exception e) {
                 e.printStackTrace();
-                JOptionPane.showMessageDialog(
-                        null,
-                        "Error: " + e.getMessage(),
-                        "Error",
-                        JOptionPane.ERROR_MESSAGE
-                );
+                statusPanel.setVisible(true);
+                statusLabel.setText("Error: " + e.getMessage());
+                statusFileLabel.setText("");
+                statusProgressBar.setVisible(false);
             }
         }
     }
 
-    // Rounded rectangle with dashed magenta border
+    // Rounded rectangle with dashed border; preferred size for drop box
     private static class DropAreaPanel extends JPanel {
         @Override
         public Dimension getPreferredSize() {
-            return new Dimension(500, 250);
+            return new Dimension(520, 250);
         }
 
         @Override
@@ -410,12 +523,12 @@ public class DesktopUi {
             int y = inset;
             int w = getWidth() - 2 * inset;
             int h = getHeight() - 2 * inset;
-            int arc = 24;
+            int arc = 16;
 
             float[] dash = {6f, 6f};
             g2.setColor(DROP_BORDER);
             g2.setStroke(new BasicStroke(
-                    2f,
+                    1.8f,
                     BasicStroke.CAP_ROUND,
                     BasicStroke.JOIN_ROUND,
                     0f,
@@ -428,7 +541,7 @@ public class DesktopUi {
         }
     }
 
-    // Rounded border for modern pill look (used by textbox and button)
+    // Rounded border for text field and buttons
     private static class RoundedBorder implements Border {
         private final int radius;
         private final Color color;

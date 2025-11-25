@@ -19,13 +19,6 @@ public class TimeSeriesInterpolationService {
         this.csvService = csvService;
     }
 
-    /**
-     * Process the file and write an output file using the provided suffix.
-     * Examples:
-     *   input: test.csv, suffix "2025-01-01" -> test_2025-01-01.csv
-     *   input: test.csv, suffix "final"      -> test_final.csv
-     *   input: test.csv, suffix ""           -> test_.csv
-     */
     public Path processFile(Path inputPath, String suffixRaw) throws IOException {
         CsvTable table = csvService.readCsv(inputPath);
         List<DataRow> originalRows = new ArrayList<>(table.getRows());
@@ -54,20 +47,18 @@ public class TimeSeriesInterpolationService {
 
         String middle;
         if (suffix.isEmpty()) {
-            // user left textbox empty -> remain the same filename
-            middle = "";
+            middle = "";          // no change
         } else {
-            // prepend underscore to whatever user typed
             middle = "_" + suffix;
         }
 
         Path outputPath = inputPath.getParent()
                 .resolve(baseName + middle + ext);
 
+        // write + stats happen inside CsvService
         csvService.writeCsv(outputPath, outputTable);
 
         // TODO: add S3 upload using outputPath
-
         return outputPath;
     }
 
@@ -160,7 +151,7 @@ public class TimeSeriesInterpolationService {
             double vEnd = Double.parseDouble(rows.get(end).getValues().get(colIndex));
             Instant tStart = rows.get(start).getTimestamp();
             Instant tEnd = rows.get(end).getTimestamp();
-            long totalMillis = Duration.between(tStart, tEnd).toMillis();
+            long totalMillis = java.time.Duration.between(tStart, tEnd).toMillis();
             if (totalMillis <= 0) {
                 continue;
             }
@@ -170,7 +161,7 @@ public class TimeSeriesInterpolationService {
                 String cell = row.getValues().get(colIndex);
 
                 if (cell == null || cell.isBlank()) {
-                    long currentMillis = Duration.between(tStart, row.getTimestamp()).toMillis();
+                    long currentMillis = java.time.Duration.between(tStart, row.getTimestamp()).toMillis();
                     double ratio = (double) currentMillis / (double) totalMillis;
                     double vCurrent = vStart + (vEnd - vStart) * ratio;
                     row.getValues().set(colIndex, Double.toString(vCurrent));
