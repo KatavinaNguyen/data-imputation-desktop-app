@@ -19,7 +19,14 @@ public class TimeSeriesInterpolationService {
         this.csvService = csvService;
     }
 
-    public Path processFile(Path inputPath) throws IOException {
+    /**
+     * Process the file and write an output file using the provided suffix.
+     * Examples:
+     *   input: test.csv, suffix "2025-01-01" -> test_2025-01-01.csv
+     *   input: test.csv, suffix "final"      -> test_final.csv
+     *   input: test.csv, suffix ""           -> test_.csv
+     */
+    public Path processFile(Path inputPath, String suffixRaw) throws IOException {
         CsvTable table = csvService.readCsv(inputPath);
         List<DataRow> originalRows = new ArrayList<>(table.getRows());
 
@@ -27,15 +34,13 @@ public class TimeSeriesInterpolationService {
             throw new IllegalArgumentException("Need at least 2 data rows to interpolate.");
         }
 
-        // Sort by timestamp
         originalRows.sort(Comparator.comparing(DataRow::getTimestamp));
 
         Duration step = detectStep(originalRows);
 
-        // Build a regular time grid and align rows
-        List<DataRow> fullRows = fillMissingTimestamps(originalRows, step, table.getHeaders().size() - 1);
+        List<DataRow> fullRows =
+                fillMissingTimestamps(originalRows, step, table.getHeaders().size() - 1);
 
-        // Interpolate per column (only numeric gaps, never overriding non-blank cells)
         interpolateColumns(fullRows, step);
 
         CsvTable outputTable = new CsvTable(table.getHeaders(), fullRows);
@@ -45,12 +50,23 @@ public class TimeSeriesInterpolationService {
         String baseName = (dotIndex > 0) ? fileName.substring(0, dotIndex) : fileName;
         String ext = (dotIndex > 0) ? fileName.substring(dotIndex) : ".csv";
 
+        String suffix = (suffixRaw == null) ? "" : suffixRaw.trim();
+
+        String middle;
+        if (suffix.isEmpty()) {
+            // user left textbox empty -> remain the same filename
+            middle = "";
+        } else {
+            // prepend underscore to whatever user typed
+            middle = "_" + suffix;
+        }
+
         Path outputPath = inputPath.getParent()
-                .resolve(baseName + "_interpolated" + ext);
+                .resolve(baseName + middle + ext);
 
         csvService.writeCsv(outputPath, outputTable);
 
-        // Later: add an S3 upload here if desired.
+        // TODO: add S3 upload using outputPath
 
         return outputPath;
     }
@@ -83,7 +99,6 @@ public class TimeSeriesInterpolationService {
                                                 Duration step,
                                                 int columnCount) {
 
-        // Ensure sorted
         sortedRows.sort(Comparator.comparing(DataRow::getTimestamp));
 
         Map<Instant, DataRow> byTimestamp = new HashMap<>();
@@ -100,7 +115,6 @@ public class TimeSeriesInterpolationService {
             if (existing != null) {
                 full.add(existing);
             } else {
-                // brand new row with blanks
                 List<String> values = new ArrayList<>();
                 for (int i = 0; i < columnCount; i++) {
                     values.add("");
@@ -127,7 +141,6 @@ public class TimeSeriesInterpolationService {
         int i = 0;
 
         while (i < n) {
-            // Find start index with numeric value
             while (i < n && !isNumeric(rows.get(i).getValues().get(colIndex))) {
                 i++;
             }
@@ -136,7 +149,6 @@ public class TimeSeriesInterpolationService {
             int start = i;
             i++;
 
-            // Find end index with numeric value
             while (i < n && !isNumeric(rows.get(i).getValues().get(colIndex))) {
                 i++;
             }
@@ -153,12 +165,10 @@ public class TimeSeriesInterpolationService {
                 continue;
             }
 
-            // Fill blanks between start and end only where cell is blank
             for (int j = start + 1; j < end; j++) {
                 DataRow row = rows.get(j);
                 String cell = row.getValues().get(colIndex);
 
-                // Only interpolate if the cell is blank (do NOT overwrite keywords/text)
                 if (cell == null || cell.isBlank()) {
                     long currentMillis = Duration.between(tStart, row.getTimestamp()).toMillis();
                     double ratio = (double) currentMillis / (double) totalMillis;
@@ -167,7 +177,6 @@ public class TimeSeriesInterpolationService {
                 }
             }
 
-            // Next segment will start from current end
             i = end;
         }
     }
@@ -178,7 +187,7 @@ public class TimeSeriesInterpolationService {
             Double.parseDouble(s.trim());
             return true;
         } catch (NumberFormatException e) {
-            return false; // treat as keyword/text
+            return false;
         }
     }
 }
