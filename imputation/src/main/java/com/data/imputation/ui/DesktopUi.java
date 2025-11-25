@@ -6,8 +6,9 @@ import org.springframework.stereotype.Component;
 
 import javax.swing.*;
 import javax.swing.border.Border;
-import javax.swing.border.LineBorder;
+import javax.swing.plaf.basic.BasicButtonUI;
 import javax.swing.event.DocumentEvent;
+
 import javax.swing.event.DocumentListener;
 import java.awt.BasicStroke;
 import java.awt.BorderLayout;
@@ -63,7 +64,6 @@ public class DesktopUi {
     // buttons: white, light grey hover, black text
     private static final Color BTN_BG       = new Color(250, 250, 250);
     private static final Color BTN_BG_HOVER = new Color(230, 230, 230);
-    private static final Color BTN_BORDER   = new Color(180, 180, 185);
     private static final Color BTN_TEXT     = Color.BLACK;
 
     private static final Color BORDER_SOFT  = new Color(54, 54, 60);   // subtle outlines
@@ -326,13 +326,19 @@ public class DesktopUi {
     }
 
     private void styleWhiteButton(JButton button) {
+        // Drop Nimbus’ rounded styling
+        button.setUI(new BasicButtonUI());
+
         button.setBackground(BTN_BG);
         button.setForeground(BTN_TEXT);
         button.setFocusPainted(false);
+        button.setBorderPainted(false);
         button.setContentAreaFilled(true);
         button.setOpaque(true);
-        // square, light gray border (no rounding)
-        button.setBorder(new LineBorder(BTN_BORDER));
+
+        // Bigger clickable area, but no visible border
+        button.setBorder(BorderFactory.createEmptyBorder(8, 20, 8, 20));
+
         button.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 
         Color normalBg = BTN_BG;
