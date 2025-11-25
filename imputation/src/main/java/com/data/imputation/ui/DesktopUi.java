@@ -348,7 +348,7 @@ public class DesktopUi {
 
             JOptionPane.showMessageDialog(
                     null,
-                    "Interpolation complete.\nOutput file:\n" + outputPath,
+                    "Completed\nOutput file:\n" + outputPath,
                     "Done",
                     JOptionPane.INFORMATION_MESSAGE
             );
