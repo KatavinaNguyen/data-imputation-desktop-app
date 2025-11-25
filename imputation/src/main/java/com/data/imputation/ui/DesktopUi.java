@@ -1,10 +1,12 @@
 package com.data.imputation.ui;
 
+import com.data.imputation.service.S3Service;
 import com.data.imputation.service.TimeSeriesInterpolationService;
 import org.springframework.stereotype.Component;
 
 import javax.swing.*;
 import javax.swing.border.Border;
+import javax.swing.border.LineBorder;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import java.awt.BasicStroke;
@@ -37,6 +39,7 @@ import java.util.List;
 public class DesktopUi {
 
     private final TimeSeriesInterpolationService interpolationService;
+    private final S3Service s3Service;
 
     private JTextField suffixField;
     private JLabel exampleLabel;
@@ -47,7 +50,7 @@ public class DesktopUi {
     private JLabel statusFileLabel;
     private JProgressBar statusProgressBar;
     private JLabel cancelLabel;
-    private SwingWorker<Path, Void> currentWorker;
+    private SwingWorker<ProcessingResult, Void> currentWorker;
 
     // Neutral dark grey theme
     private static final Color BG_MAIN      = new Color(12, 12, 14);   // window background
@@ -71,8 +74,10 @@ public class DesktopUi {
     // simple limit hint for UI
     private static final int MAX_FILE_MB = 10;
 
-    public DesktopUi(TimeSeriesInterpolationService interpolationService) {
+    public DesktopUi(TimeSeriesInterpolationService interpolationService,
+                     S3Service s3Service) {
         this.interpolationService = interpolationService;
+        this.s3Service = s3Service;
     }
 
     public void show() {
@@ -273,7 +278,6 @@ public class DesktopUi {
             cancelLabel.addMouseListener(new MouseAdapter() {
                 @Override
                 public void mouseClicked(MouseEvent e) {
-                    // only react if a job is actually running
                     if (currentWorker != null && !currentWorker.isDone()) {
                         cancelCurrentWorker();
                     }
@@ -285,7 +289,6 @@ public class DesktopUi {
             statusPanel.add(cancelLabel, BorderLayout.EAST);
             statusPanel.setVisible(false);
             cancelLabel.setVisible(false);   // start hidden
-
 
             // wrap bottom area: drop area + status panel
             JPanel dropWrapper = new JPanel(new BorderLayout());
@@ -326,9 +329,10 @@ public class DesktopUi {
         button.setBackground(BTN_BG);
         button.setForeground(BTN_TEXT);
         button.setFocusPainted(false);
-        button.setContentAreaFilled(false);
+        button.setContentAreaFilled(true);
         button.setOpaque(true);
-        button.setBorder(new RoundedBorder(1, BTN_BORDER));
+        // square, light gray border (no rounding)
+        button.setBorder(new LineBorder(BTN_BORDER));
         button.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 
         Color normalBg = BTN_BG;
@@ -417,17 +421,32 @@ public class DesktopUi {
         String suffix = (suffixField != null) ? suffixField.getText() : "";
 
         statusPanel.setVisible(true);
-        statusLabel.setText("Processing file...");
+        statusLabel.setText("Processing file and uploading to S3...");
         statusFileLabel.setText(inputPath.getFileName().toString());
         statusProgressBar.setIndeterminate(true);
         statusProgressBar.setVisible(true);
         cancelLabel.setEnabled(true);
         cancelLabel.setForeground(new Color(90, 150, 255));
+        cancelLabel.setVisible(true);
 
-        SwingWorker<Path, Void> worker = new SwingWorker<>() {
+        SwingWorker<ProcessingResult, Void> worker = new SwingWorker<>() {
             @Override
-            protected Path doInBackground() throws Exception {
-                return interpolationService.processFile(inputPath, suffix);
+            protected ProcessingResult doInBackground() {
+                Path outputPath = null;
+                String s3Url = null;
+                Exception uploadError = null;
+
+                try {
+                    // 1) Clean + interpolate
+                    outputPath = interpolationService.processFile(inputPath, suffix);
+
+                    // 2) Upload to S3
+                    s3Url = s3Service.uploadFile(outputPath);
+                } catch (Exception e) {
+                    uploadError = e;
+                }
+
+                return new ProcessingResult(outputPath, s3Url, uploadError);
             }
 
             @Override
@@ -439,20 +458,39 @@ public class DesktopUi {
                         cancelLabel.setEnabled(false);
                         cancelLabel.setForeground(FG_MUTED);
                         cancelLabel.setVisible(false);   // hide after cancel
+                        statusFileLabel.setText("");
                         return;
                     }
 
-                    Path output = get(); 
-                    statusLabel.setText("File complete.");
-                    statusFileLabel.setText(output.getFileName().toString());
+                    ProcessingResult result = get();
+
                     statusProgressBar.setIndeterminate(false);
                     statusProgressBar.setVisible(false);
                     cancelLabel.setEnabled(false);
                     cancelLabel.setForeground(FG_MUTED);
-                    cancelLabel.setVisible(false);       // hide after success
+                    cancelLabel.setVisible(false);
+
+                    if (result.outputPath == null) {
+                        statusLabel.setText("Error: no output file produced.");
+                        statusFileLabel.setText("");
+                        return;
+                    }
+
+                    if (result.uploadError == null && result.s3Url != null) {
+                        statusLabel.setText("File clean complete. Upload complete.");
+                        statusFileLabel.setText(result.s3Url);
+                    } else if (result.uploadError != null) {
+                        statusLabel.setText("File clean complete. Upload failed: "
+                                + result.uploadError.getMessage());
+                        statusFileLabel.setText(result.outputPath.getFileName().toString());
+                        result.uploadError.printStackTrace();
+                    } else {
+                        // Shouldn't usually happen, but handle gracefully
+                        statusLabel.setText("File clean complete. Upload status unknown.");
+                        statusFileLabel.setText(result.outputPath.getFileName().toString());
+                    }
 
                 } catch (Exception e) {
-                    // handles InterruptedException / ExecutionException
                     statusLabel.setText("Error: " + e.getMessage());
                     statusFileLabel.setText("");
                     statusProgressBar.setVisible(false);
@@ -500,6 +538,19 @@ public class DesktopUi {
         }
     }
 
+    // data holder for worker result
+    private static class ProcessingResult {
+        final Path outputPath;
+        final String s3Url;
+        final Exception uploadError;
+
+        ProcessingResult(Path outputPath, String s3Url, Exception uploadError) {
+            this.outputPath = outputPath;
+            this.s3Url = s3Url;
+            this.uploadError = uploadError;
+        }
+    }
+
     // Rounded rectangle with dashed border; preferred size for drop box
     private static class DropAreaPanel extends JPanel {
         @Override
@@ -541,7 +592,7 @@ public class DesktopUi {
         }
     }
 
-    // Rounded border for text field and buttons
+    // Rounded border for text field (buttons now use square border)
     private static class RoundedBorder implements Border {
         private final int radius;
         private final Color color;
