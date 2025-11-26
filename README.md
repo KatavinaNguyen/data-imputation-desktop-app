@@ -12,6 +12,11 @@ Engineers frequently work with incomplete or corrupted time-series logs: irregul
 The purpose of this app is as a fully automated, multithreaded repair pipeline built for performance and safety.
 The app ingests large CSVs, identifies structural defects, reconstructs full timestamp sequences, interpolates numeric gaps, preserves operational keywords, and produces column-level statistical summaries. Processing runs in background threads with drag-and-drop ingestion and safe cancellation. Cleaned datasets are saved locally and optionally uploaded to AWS S3 through the AWS SDK v2 with tightly scoped IAM credentials.
 
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/7fe05b7b-3bb9-4779-9863-555133548cb9" width="900" />
+</p>
+
+
 # How To Run The App
 [ 1 ] **Install Requirements**
 1. Java 17+
@@ -103,6 +108,8 @@ Default output format [None]:    json
 3. File cleaning will begin immediately upon drop in/selection of the file.
 
 # Results
+<img width="1472" height="740" alt="imputation-image" src="https://github.com/user-attachments/assets/58e00538-03bb-4a8b-a116-a66361005b39" />
+
 [ 1 ] **Cleans + Interpolates the Data**
 - Detects the timestamp interval
 - Fills missing timestamps
@@ -158,32 +165,6 @@ Default output format [None]:    json
 - This expands the tool’s usefulness beyond simple CSV pipelines.
 
 [ 5 ] **Session-level data quality reporting**
-
-- Maintain in-session counters summarizing total gaps filled, keyword detections, and completeness improvements across all processed files.
-- At the end of the session, generate a compact summary file highlighting overall data quality improvements.
-
-# Future Improvements
-**AI-enhanced imputation for complex datasets**
-
-- Integrate ML/AI-driven models to handle irregular patterns, sensor drift, and noisy data.
-- Lightweight forecasting, anomaly detection, or learned interpolation models would improve accuracy beyond deterministic methods.
-
-**Scalable processing for larger workloads**
-
-- Refactor the core pipeline to support streaming or chunked processing.
-- This enables efficient handling of multi-GB files, wider tables, and long-duration time series without memory limitations.
-
-**Broader set of imputation strategies**
-
-- Introduce selectable methods such as spline interpolation, forward/backward fill, and rolling statistical estimates.
-- A method selector in the UI lets users match the imputation strategy to the structure of their dataset.
-
-**Support for additional input and output formats**
-
-- Add pluggable handlers for Excel, JSON, and Parquet to improve compatibility with analytics and data engineering workflows.
-- This expands the tool’s usefulness beyond simple CSV pipelines.
-
-**Session-level data quality reporting**
 
 - Maintain in-session counters summarizing total gaps filled, keyword detections, and completeness improvements across all processed files.
 - At the end of the session, generate a compact summary file highlighting overall data quality improvements.
